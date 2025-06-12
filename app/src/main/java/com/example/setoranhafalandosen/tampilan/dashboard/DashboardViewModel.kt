@@ -238,11 +238,13 @@ class HomeView(private val tokenManager: TokenManager) : ViewModel() {
     fun simpanSetoran(nim: String, data: List<Setoran>, tglSetoran: String? = null) {
         viewModelScope.launch {
             try {
-                var token = tokenManager.getAccessToken()
-                if (token == null) {
+                val originalToken = tokenManager.getAccessToken()
+                if (originalToken == null) {
                     _dashboardState.value = DashboardState.Error("Token akses tidak tersedia")
                     return@launch
                 }
+
+                var token = originalToken // Gunakan variabel mutable setelah pengecekan null
 
                 // Log token untuk debugging
                 try {
@@ -263,7 +265,6 @@ class HomeView(private val tokenManager: TokenManager) : ViewModel() {
                     return@launch
                 }
 
-                // Coba simpan dengan token saat ini
                 val request = SetoranRequest(data_setoran = data, tgl_setoran = tglSetoran)
                 Log.d(TAG, "Request body: ${Gson().toJson(request)}")
                 Log.d(TAG, "Authorization header: Bearer $token")
@@ -274,7 +275,6 @@ class HomeView(private val tokenManager: TokenManager) : ViewModel() {
                     token = "Bearer $token"
                 )
 
-                // Jika token expired, coba refresh
                 if (response.code() == 401) {
                     Log.d(TAG, "Token expired, mencoba refresh token...")
                     val refreshToken = tokenManager.getRefreshToken()
@@ -328,7 +328,6 @@ class HomeView(private val tokenManager: TokenManager) : ViewModel() {
                     }
                 }
 
-                // Handle response akhir
                 if (response.isSuccessful) {
                     Log.d(TAG, "✅ Setoran berhasil disimpan")
                     fetchSetoranMahasiswa(nim)
