@@ -44,8 +44,35 @@ class LoginViewModel(private val tokenManager: TokenManager) : ViewModel() {
     }
 
     fun logout() {
+        // Clear local tokens without network call
         tokenManager.clearTokens()
         _loginState.value = LoginState.Idle
+    }
+
+    fun logoutServer(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val idToken = tokenManager.getIdToken()
+            if (idToken == null) {
+                tokenManager.clearTokens()
+                onResult(true, "Token lokal dibersihkan")
+                return@launch
+            }
+            try {
+                val resp = RetrofitClient.kcApiService.logout(
+                    clientId = "setoran-mobile-dev",
+                    clientSecret = "aqJp3xnXKudgC7RMOshEQP7ZoVKWzoSl",
+                    idToken = idToken
+                )
+                if (resp.isSuccessful) {
+                    tokenManager.clearTokens()
+                    onResult(true, "Logout berhasil")
+                } else {
+                    onResult(false, "Gagal logout: ${resp.message()}")
+                }
+            } catch (e: Exception) {
+                onResult(false, "Kesalahan: ${e.message}")
+            }
+        }
     }
 
     companion object {

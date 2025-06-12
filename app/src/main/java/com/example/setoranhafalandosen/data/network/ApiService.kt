@@ -1,6 +1,9 @@
 package com.example.setoranhafalandosen.data.network
 
-import com.example.setoranhafalandosen.data.model.*
+import com.example.setoranhafalandosen.data.model.AuthResponse
+import com.example.setoranhafalandosen.data.model.MahasiswaSetoranResponse
+import com.example.setoranhafalandosen.data.model.SetoranRequest
+import com.example.setoranhafalandosen.data.model.SetoranResponse
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
@@ -33,19 +36,18 @@ interface ApiService {
     ): Response<SetoranResponse>
 
     @GET("dosen/pa-saya")
-    suspend fun getDataDosenPA(
-        @Header("Authorization") token: String,
-        @Query("apikey") accessToken: String
-    ): Response<SetoranResponse>
+    suspend fun getDosenPA(
+        @Header("Authorization") token: String
+    ): Response<ResponseBody>
 
-    @POST("setoran-mahasiswa/{nim}")
+    @POST("mahasiswa/setoran/{nim}")
     suspend fun simpanSetoran(
         @Path("nim") nim: String,
         @Body body: SetoranRequest,
         @Header("Authorization") token: String
     ): Response<ResponseBody>
 
-    @HTTP(method = "DELETE", path = "setoran-mahasiswa/{nim}", hasBody = true)
+    @HTTP(method = "DELETE", path = "mahasiswa/setoran/{nim}", hasBody = true)
     suspend fun hapusSetoran(
         @Path("nim") nim: String,
         @Body body: SetoranRequest,
@@ -57,4 +59,13 @@ interface ApiService {
         @Path("nim") nim: String,
         @Header("Authorization") token: String
     ): Response<MahasiswaSetoranResponse>
+
+    // Logout endpoint (Keycloak)
+    @FormUrlEncoded
+    @POST("/realms/dev/protocol/openid-connect/logout")
+    suspend fun logout(
+        @Field("client_id") clientId: String,
+        @Field("client_secret") clientSecret: String,
+        @Field("id_token_hint") idToken: String
+    ): Response<ResponseBody>
 }

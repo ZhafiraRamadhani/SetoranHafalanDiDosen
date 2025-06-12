@@ -1,6 +1,5 @@
 package com.example.setoranhafalandosen.tampilan.setoran
 
-import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,11 +19,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import kotlinx.coroutines.launch
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
 import com.example.setoranhafalandosen.data.model.Setoran
-import com.example.setoranhafalandosen.data.model.SetoranItem
 import com.example.setoranhafalandosen.tampilan.dashboard.DashboardState
 import com.example.setoranhafalandosen.tampilan.dashboard.HomeView
-import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+
+val CreamBackground = Color(0xFFFFF8E1)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,11 +44,24 @@ fun SetoranScreen(navController: NavController, nim: String) {
 
     val selectedSetoran = remember { mutableStateMapOf<String, Setoran>() }
     var isProcessing by remember { mutableStateOf(false) }
-    var showConfirmDialog by remember { mutableStateOf(false) }
-    var actionType by remember { mutableStateOf("") } // "post" or "delete"
+
+    val refreshTrigger = remember { mutableStateOf(false) }
+
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showCancelDialog by remember { mutableStateOf(false) }
+    var resultDialogMessage by remember { mutableStateOf<String?>(null) }
+
+    var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         homeViewModel.fetchSetoranSaya()
+        homeViewModel.fetchSetoranMahasiswa(nim)
+    }
+
+    LaunchedEffect(refreshTrigger.value) {
         homeViewModel.fetchSetoranMahasiswa(nim)
     }
 
@@ -59,80 +78,32 @@ fun SetoranScreen(navController: NavController, nim: String) {
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Button(
-                    enabled = selectedSetoran.isNotEmpty() && !isProcessing,
-                    onClick = {
-                        actionType = "post"
-                        showConfirmDialog = true
-                    }
+            if (dashboardState is DashboardState.Success) {
+                val showButtons = selectedSetoran.isNotEmpty() && !isProcessing
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("Simpan (${selectedSetoran.size})")
-                }
-
-                OutlinedButton(
-                    enabled = selectedSetoran.isNotEmpty() && !isProcessing,
-                    onClick = {
-                        actionType = "delete"
-                        showConfirmDialog = true
+                    OutlinedButton(
+                        onClick = { showCancelDialog = true },
+                        enabled = showButtons,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Batalkan (${selectedSetoran.size})")
                     }
-                ) {
-                    Text("Batalkan (${selectedSetoran.size})")
+                    Button(
+                        onClick = { showSaveDialog = true },
+                        enabled = showButtons,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Simpan (${selectedSetoran.size})")
+                    }
                 }
             }
         }
     ) { padding ->
-        if (showConfirmDialog) {
-            AlertDialog(
-                onDismissRequest = { showConfirmDialog = false },
-                title = {
-                    Text(if (actionType == "post") "Konfirmasi Simpan" else "Konfirmasi Batalkan")
-                },
-                text = {
-                    Text("Apakah Anda yakin ingin ${if (actionType == "post") "menyimpan" else "membatalkan"} ${selectedSetoran.size} setoran?")
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showConfirmDialog = false
-                        scope.launch {
-                            isProcessing = true
-                            try {
-                                if (actionType == "post") {
-                                    homeViewModel.simpanSetoran(nim, selectedSetoran.values.toList())
-                                    homeViewModel.updateCacheSetoranLangsung(nim, setoranList)
-                                    homeViewModel.fetchSetoranMahasiswa(nim)
-                                    homeViewModel.fetchSetoranSaya()
-                                    snackbarHostState.showSnackbar("✅ Setoran berhasil disimpan")
-                                } else {
-                                    homeViewModel.hapusSetoran(nim, selectedSetoran.values.toList())
-                                    homeViewModel.updateCacheSetoranLangsung(nim, setoranList)
-                                    homeViewModel.fetchSetoranMahasiswa(nim)
-                                    homeViewModel.fetchSetoranSaya()
-                                    snackbarHostState.showSnackbar("🗑️ Setoran dibatalkan")
-                                }
-                                selectedSetoran.clear()
-                            } catch (e: Exception) {
-                                snackbarHostState.showSnackbar("❌ Gagal memproses setoran")
-                            }
-                            isProcessing = false
-                        }
-                    }) {
-                        Text("Ya")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showConfirmDialog = false }) {
-                        Text("Tidak")
-                    }
-                }
-            )
-        }
-
         when (val state = dashboardState) {
             is DashboardState.Loading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -141,20 +112,26 @@ fun SetoranScreen(navController: NavController, nim: String) {
             }
             is DashboardState.Success -> {
                 val mahasiswa = state.data.info_mahasiswa_pa.daftar_mahasiswa.find { it.nim == nim }
-                val groupedSetoran = setoranList.groupBy { it.label.ifEmpty { "Lainnya" } }
+
+                val filteredList = if (searchQuery.isBlank()) {
+                    setoranList
+                } else {
+                    setoranList.filter { it.nama.contains(searchQuery, ignoreCase = true) }
+                }
+                val groupedSetoran = filteredList.groupBy { it.label.ifEmpty { "Lainnya" } }
 
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(16.dp, bottom = 80.dp),
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
                         mahasiswa?.let {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceVariant)
+                                colors = CardDefaults.cardColors(containerColor = CreamBackground)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(16.dp),
@@ -180,8 +157,50 @@ fun SetoranScreen(navController: NavController, nim: String) {
                                         Text(it.nama, style = MaterialTheme.typography.titleMedium)
                                         Text("NIM: ${it.nim}")
                                         Text("Angkatan: ${it.angkatan}, Semester ${it.semester}")
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        val totalWajib = it.info_setoran.total_wajib_setor
+                                        val progressFraction = if (totalWajib > 0) {
+                                            it.info_setoran.total_sudah_setor.toFloat() / totalWajib
+                                        } else 0f
+                                        LinearProgressIndicator(
+                                            progress = progressFraction.coerceIn(0f, 1f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(8.dp),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Progress Surah: ${it.info_setoran.total_sudah_setor} / $totalWajib",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text("Cari Surah") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Tanggal Setoran: ")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(onClick = { showDatePicker = true }) {
+                                Text(selectedDate?.toString() ?: "Pilih Tanggal")
                             }
                         }
                     }
@@ -209,9 +228,7 @@ fun SetoranScreen(navController: NavController, nim: String) {
                                         else selectedSetoran[item.id] = setoran
                                     },
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected)
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                    else MaterialTheme.colorScheme.surface
+                                    containerColor = if (isSelected) CreamBackground else MaterialTheme.colorScheme.surface
                                 )
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
@@ -229,13 +246,144 @@ fun SetoranScreen(navController: NavController, nim: String) {
                         }
                     }
                 }
+
+                LaunchedEffect(dashboardState) {
+                    if (dashboardState is DashboardState.Error) {
+                        val errorMessage = (dashboardState as DashboardState.Error).message
+                        snackbarHostState.showSnackbar(errorMessage)
+
+                        if (errorMessage.contains("Token") ||
+                            errorMessage.contains("Sesi") ||
+                            errorMessage.contains("login") ||
+                            errorMessage.contains("Akses ditolak")) {
+                            kotlinx.coroutines.delay(1000)
+                            navController.navigate("login") {
+                                popUpTo("dashboard") { inclusive = true }
+                            }
+                        }
+                    }
+                }
+
+                if (showSaveDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showSaveDialog = false },
+                        title = { Text("Konfirmasi Simpan") },
+                        text = { Text("Apakah Anda yakin ingin menyimpan setoran?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showSaveDialog = false
+                                scope.launch {
+                                    isProcessing = true
+                                    try {
+                                        homeViewModel.simpanSetoran(
+                                            nim,
+                                            selectedSetoran.values.toList(),
+                                            tglSetoran = selectedDate?.toString()
+                                        )
+                                        snackbarHostState.showSnackbar("✅ Setoran berhasil disimpan")
+                                        resultDialogMessage = "Setoran berhasil disimpan!"
+                                        selectedSetoran.clear()
+                                        homeViewModel.fetchSetoranMahasiswa(nim)
+                                        homeViewModel.fetchSetoranSaya()
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar("Gagal menyimpan setoran: ${e.message}")
+                                    } finally {
+                                        isProcessing = false
+                                    }
+                                }
+                            }) {
+                                Text("Ya")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showSaveDialog = false }) {
+                                Text("Tidak")
+                            }
+                        }
+                    )
+                }
+
+                if (showCancelDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showCancelDialog = false },
+                        title = { Text("Konfirmasi Pembatalan") },
+                        text = { Text("Apakah Anda yakin ingin membatalkan setoran terpilih?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showCancelDialog = false
+                                scope.launch {
+                                    isProcessing = true
+                                    try {
+                                        homeViewModel.hapusSetoran(
+                                            nim,
+                                            selectedSetoran.values.toList()
+                                        )
+                                        snackbarHostState.showSnackbar("🗑️ Setoran dibatalkan")
+                                        resultDialogMessage = "Setoran berhasil dibatalkan!"
+                                        selectedSetoran.clear()
+                                        refreshTrigger.value = !refreshTrigger.value
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar("❌ Gagal membatalkan setoran")
+                                    }
+                                    isProcessing = false
+                                }
+                            }) {
+                                Text("Ya")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showCancelDialog = false }) {
+                                Text("Tidak")
+                            }
+                        }
+                    )
+                }
+
+                resultDialogMessage?.let { msg ->
+                    AlertDialog(
+                        onDismissRequest = { resultDialogMessage = null },
+                        confirmButton = {
+                            TextButton(onClick = { resultDialogMessage = null }) {
+                                Text("OK")
+                            }
+                        },
+                        title = { Text("Berhasil") },
+                        text = { Text(msg) }
+                    )
+                }
             }
+
             is DashboardState.Error -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Terjadi kesalahan: ${state.message}")
                 }
             }
+
             else -> {}
+        }
+
+        if (showDatePicker) {
+            val datePickerState = rememberDatePickerState(
+                initialSelectedDateMillis = selectedDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
+            )
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val millis = datePickerState.selectedDateMillis
+                        if (millis != null) {
+                            val date = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                            selectedDate = date
+                        }
+                        showDatePicker = false
+                    }) { Text("OK") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDatePicker = false }) { Text("Batal") }
+                }
+            ) {
+                DatePicker(state = datePickerState)
+            }
         }
     }
 }

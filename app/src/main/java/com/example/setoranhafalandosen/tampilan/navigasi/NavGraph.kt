@@ -1,4 +1,5 @@
 package com.example.setoranhafalandosen.tampilan.navigasi
+
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -7,8 +8,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.example.setoranhafalandosen.tampilan.dashboard.HomeScreen
 import com.example.setoranhafalandosen.tampilan.login.LoginScreen
+import com.example.setoranhafalandosen.tampilan.mahasiswa.MahasiswaScreen
+import com.example.setoranhafalandosen.tampilan.profil.ProfileScreen
 import com.example.setoranhafalandosen.tampilan.setoran.SetoranScreen
-
 
 @Composable
 fun SetupNavGraph(navController: NavHostController) {
@@ -21,6 +23,12 @@ fun SetupNavGraph(navController: NavHostController) {
         }
         composable("dashboard") {
             HomeScreen(navController = navController)
+        }
+        composable("mahasiswa") {
+            MahasiswaScreen(navController = navController)
+        }
+        composable("profile") {
+            ProfileScreen(navController = navController)
         }
         composable(
             route = "setoran/{nim}",
